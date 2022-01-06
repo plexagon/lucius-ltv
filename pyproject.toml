@@ -1,18 +1,13 @@
 [tool.poetry]
 name = "lucius-ltv"
 version = "0.1.0"
-description = ""
+description = "A simple multicohort LTV calculator for subscription based products"
 authors = ["Luca Giacomel <luca.giacomel@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.11"
-matplotlib = "^3.5.1"
-pandas = "^1.3.5"
-numpy = "^1.21.4"
-seaborn = "^0.11.2"
-arviz = "^0.11.4"
-aesara = "^2.3.3"
 pymc3 = "^3.11.4"
+seaborn = "^0.11.2"
 
 [tool.poetry.dev-dependencies]
 

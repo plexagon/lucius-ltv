@@ -1,9 +1,15 @@
+from typing import List, Any, Tuple
+
+import theano
 import theano.tensor as tt
 import pymc3 as pm
 import numpy as np
 import pandas as pd
-from pymc3.theanof import floatX, intX
 import arviz as az
+
+from pymc3.theanof import floatX, intX
+from scipy import stats
+from scipy.special import beta as beta_f
 
 
 def betaln(a, b):
@@ -16,6 +22,21 @@ def beta_geom_llh(x, a, b):
 
 def censored_beta_geom_llh(x, a, b):
     return betaln(a, b + x) - betaln(a, b)
+
+
+def censored_beta_geom_pdf(x, a, b):
+    return beta_f(a, b + x) / beta_f(a, b)
+
+
+def beta_geom_pdf(x, a, b):
+    return beta_f(a + 1, x + b - 1) / beta_f(a, b)
+
+
+class SPShiftedBetaGeometric(stats.rv_continuous):
+    def _pdf(self, x, t_max, a, b):
+        if x >= t_max:
+            return censored_beta_geom_pdf(x, a, b)
+        return beta_geom_pdf(x, a, b)
 
 
 class ShiftedBetaGeometric(pm.Discrete):
@@ -36,21 +57,38 @@ class ShiftedBetaGeometric(pm.Discrete):
     def logp(self, value):
         idx = tt.arange(1, value.shape[0] + 1, 1, dtype='int32')
         return tt.sum(value * beta_geom_llh(idx, self.a, self.b)) + self.surviving * censored_beta_geom_llh(
-            value.shape[0] + 1, self.a, self.b)
+            value.shape[0], self.a, self.b)
 
 
-def fit_sbg_model(cohort_matrix, verbose=False, min_cohort_size=40):
+def fit_sbg_model(cohort_matrix: pd.DataFrame, price: float = 1, all_users: List[int] = None,
+                  min_cohort_size: int = 40, periods: int = 52, true_alpha=None, true_beta=None,
+                  **sampler_kwargs: Any) -> Tuple[
+    az.InferenceData, pm.Model]:
+    """
+    Fits the SBG model for customer LTV
+    :param cohort_matrix: the retention matrix by cohort, see `generate_synthetic_cohort_matrix` for an example
+    :param price: the price users pay for each subscription renewal, by default unitary price
+    :param periods: the number of periods to forecast
+    :param all_users: optional, adds a conversion rate component to the model if you have unconverted
+        users using your product (e.g. "free users" or "free trials")
+    :param sampler_kwargs: extra kwargs to be passed to the pymc sampler
+    :param min_cohort_size: minimum size for a cohort to be considered in the fitting process
+    :return: az.InferenceData of the sbg model
+    """
+
     model = pm.Model()
     with model:
-        beta = pm.HalfCauchy('beta', 0.1)
-        alpha = pm.HalfCauchy('alpha', 0.1)
+        alpha = pm.HalfCauchy('alpha', 0.05)  # pm.HalfFlat('alpha')#pm.HalfCauchy('beta', 1)
+        beta = pm.HalfCauchy('beta', 0.05)  # pm.HalfFlat('beta')
+
         can_fit = False
+        starting_payers = []
         for i in range(cohort_matrix.shape[0]):
             effective_data = cohort_matrix.values[i][~pd.isna(cohort_matrix.values[i])]
-            if len(effective_data) > 5 and max(effective_data) > min_cohort_size:
+            starting_payers.append(effective_data[0])
+            if len(effective_data) >= 4 and max(effective_data) > min_cohort_size:
                 can_fit = True
-                # Consider only cohorts with 4 FULL renewal periods and at least 40 ppl
-                # (first one is FT->R, last is incomplete -> we need 6 total)
+                # Consider only cohorts with 4 FULL renewal periods and at least 40 (or min_cohort_size) ppl
                 ShiftedBetaGeometric(
                     f'obs_{i}_cohort',
                     a=alpha,
@@ -58,13 +96,54 @@ def fit_sbg_model(cohort_matrix, verbose=False, min_cohort_size=40):
                     observed=np.abs(np.diff(effective_data[:-1])),
                     surviving=effective_data[-2]
                 )
+
+        if not all_users:
+            conversion_rate = pm.Deterministic('conversion_rate', tt.ones(1))
+            pm.Deterministic('conversion_rate_by_cohort', tt.ones(cohort_matrix.shape[0]))
+
+        else:
+            if not all_users:
+                all_users = starting_payers
+            if not len(all_users) == cohort_matrix.shape[0]:
+                raise Exception('If provided, free trials must be provided for each cohort')
+            conversion_rate = pm.Uniform('conversion_rate', 0, 1)
+
+            conversion_rate_alpha = pm.HalfCauchy('cohort_conversion_rate_alpha', 0.5)
+
+            cohort_conversion_rate = pm.Beta('conversion_rate_by_cohort',
+                                             alpha=conversion_rate_alpha,
+                                             beta=conversion_rate_alpha * (1 / conversion_rate - 1),
+                                             shape=len(all_users))
+
+            pm.Binomial('conversion_rate_obs', n=all_users, p=cohort_conversion_rate, observed=starting_payers)
+
+        survival_probabilities, _ = theano.scan(
+            fn=lambda t: tt.switch(tt.gt(t, 1), sbg_survival_rate(t - 1, alpha, beta), tt.ones(1)),
+            sequences=tt.arange(start=1, stop=periods + 1, step=1),
+        )
+
+        survival_curve = tt.cumprod(survival_probabilities)
+        pm.Deterministic('survival_curve', survival_curve)
+        pm.Deterministic('ltv', tt.cumsum(survival_curve * conversion_rate * price))
+
+        if true_alpha and true_beta:
+            survival_probabilities, _ = theano.scan(
+                fn=lambda t: tt.switch(tt.gt(t, 1), sbg_survival_rate(t - 1, true_alpha, true_beta), tt.ones(1)),
+                sequences=tt.arange(start=1, stop=periods + 1, step=1),
+            )
+
+            survival_curve = tt.cumprod(survival_probabilities)
+            pm.Deterministic('true_survival_curve', survival_curve)
+            pm.Deterministic('true_ltv', tt.cumsum(survival_curve * conversion_rate * price))
+
         if not can_fit:
-            print(
-                'Not enough data for fitting, you need at least 1 cohort with 5 full observation periods and >40ppl (excl the first one)')
-            raise Exception('Not enough data')
-        data = pm.sample(progressbar=verbose, return_inferencedata=True, target_accept=0.9,
-                         compute_convergence_checks=False)
-        samples = pm.sample_posterior_predictive(data.posterior, progressbar=verbose)
+            raise Exception(
+                f'Not enough data for fitting, you need 1 cohort with 4 observation periods and >{min_cohort_size}ppl')
+
+        data = pm.sample(return_inferencedata=True, **sampler_kwargs)
+
+        samples = pm.fast_sample_posterior_predictive(data.posterior)
+
     return az.concat(data, az.from_pymc3(posterior_predictive=samples)), model
 
 
@@ -93,23 +172,17 @@ def _weighted_cohort_line(cohort_matrix):
     return np.array(out)
 
 
-def compute_empirical_ltv(cohort_matrix, subscription_price, conversion_to_pay=1, periods=52):
+def compute_empirical_ltv(inference_data: az.InferenceData, cohort_matrix: pd.DataFrame, price: float,
+                          periods: int = 52) -> Tuple[np.array, np.array, np.array]:
+    """
+
+    :param inference_data: InferenceData resulting from the Pymc3 model fitting, should contain traces for `conversion_rate`
+    :param cohort_matrix: the retention matrix by cohort, see `generate_synthetic_cohort_matrix` for an example
+    :param price: the price your users pays for each renewal, remember to consider taxes
+    :param periods: the maximum number of computed periods returned by the function
+    :return: Returns three np.arrays containing lower, median and upper credible intervals for the empirical LTV
+    """
+    conversion_rate = np.median(inference_data['posterior']['conversion_rate'][0])
     weighted_cohort = _weighted_cohort_line(cohort_matrix)
-    empirical_ltv = np.cumsum(weighted_cohort * subscription_price) * conversion_to_pay
-    return empirical_ltv
-
-
-def compute_predicted_ltv(idata, subscription_price_after_tax, conversion_to_pay=1, periods=52):
-    a = idata['posterior']['alpha'][0]
-    b = idata['posterior']['beta'][0]
-    history = [np.ones_like(a)]
-    for t in range(1, periods):
-        history.append(history[-1] * sbg_survival_rate(t, a, b))
-    q = np.array(history) * subscription_price_after_tax * conversion_to_pay
-    if not len(q) == periods:
-        print(len(q), periods)
-        raise Exception('')
-    predicted_low = np.cumsum(np.percentile(q=5, a=q, axis=-1))
-    predicted_mid = np.cumsum(np.percentile(q=50, a=q, axis=-1))
-    predicted_high = np.cumsum(np.percentile(q=95, a=q, axis=-1))
-    return predicted_low, predicted_mid, predicted_high
+    empirical_ltv = np.cumsum(weighted_cohort * price) * conversion_rate
+    return empirical_ltv[:periods]
