@@ -18,7 +18,6 @@ def main():
     cohort_sizes = np.random.normal(cohort_sizes, 0., size=cohorts).astype(int)
     alphas = np.random.normal(true_alpha, 0., size=cohorts)
     betas = np.random.normal(true_beta, 0., size=cohorts)
-    print(alphas, betas)
     conversion_rate = np.random.normal(true_conversion_rate, 0.1, size=cohorts)  # Conversion to Free Trial
 
     cohort_matrix = generate_synthetic_cohort_matrix(
