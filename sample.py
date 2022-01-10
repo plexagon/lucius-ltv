@@ -8,7 +8,7 @@ from plots import plot_ltv, plot_cohort_matrix_retention, plot_conversion_rate
 
 
 def main():
-    cohorts = 1
+    cohorts = 8
     max_obs_period = 10
     true_alpha = 0.7
     true_beta = 1.8
@@ -29,7 +29,7 @@ def main():
 
     inference_data, model = fit_sbg_model(
         cohort_matrix,
-        # all_users=list((cohort_sizes / conversion_rate).astype(int)),  # Optional, if you have free trials
+        all_users=list((cohort_sizes * conversion_rate).astype(int)),  # Optional, if you have free trials
         progressbar=True,
         periods=52,
         true_alpha=true_alpha,
@@ -37,7 +37,9 @@ def main():
         target_accept=0.9
     )
 
-    empirical_ltv = compute_empirical_ltv(inference_data, cohort_matrix=cohort_matrix, price=1)
+    conversion_rate = np.median(inference_data['posterior']['conversion_rate'][0])
+
+    empirical_ltv = compute_empirical_ltv(cohort_matrix=cohort_matrix, price=1, conversion_rate=conversion_rate)
 
     fig, ax = plt.subplots(figsize=(20, 10))
     plot_ltv(empirical_ltv, inference_data=inference_data, ax=ax)
@@ -60,7 +62,7 @@ def main():
                       ref_val=true_beta,
                       ax=ax2)
     az.plot_posterior(inference_data, var_names=("conversion_rate",),
-                      ref_val=true_conversion_rate,
+                      ref_val=1/true_conversion_rate,
                       ax=ax3)
     fig.suptitle(f'True v Recovered values')
 

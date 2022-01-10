@@ -172,17 +172,15 @@ def _weighted_cohort_line(cohort_matrix):
     return np.array(out)
 
 
-def compute_empirical_ltv(inference_data: az.InferenceData, cohort_matrix: pd.DataFrame, price: float,
+def compute_empirical_ltv(cohort_matrix: pd.DataFrame, price: float = 1, conversion_rate: float = 1,
                           periods: int = 52) -> Tuple[np.array, np.array, np.array]:
     """
-
-    :param inference_data: InferenceData resulting from the Pymc3 model fitting, should contain traces for `conversion_rate`
+    :param conversion_rate: optional, if the model was fit using it.
     :param cohort_matrix: the retention matrix by cohort, see `generate_synthetic_cohort_matrix` for an example
     :param price: the price your users pays for each renewal, remember to consider taxes
     :param periods: the maximum number of computed periods returned by the function
     :return: Returns three np.arrays containing lower, median and upper credible intervals for the empirical LTV
     """
-    conversion_rate = np.median(inference_data['posterior']['conversion_rate'][0])
     weighted_cohort = _weighted_cohort_line(cohort_matrix)
     empirical_ltv = np.cumsum(weighted_cohort * price) * conversion_rate
     return empirical_ltv[:periods]
