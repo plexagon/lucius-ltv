@@ -1,3 +1,7 @@
+<div>
+    <img src='https://raw.githubusercontent.com/luke14free/lucius-ltv/main/assets/logo.png'>
+</div>
+
 # Lucius LTV
 
 A Python simple multi-cohort LTV calculator library for subscription-based products.
@@ -101,7 +105,7 @@ The library also includes a few methods for quickly plotting results.
 
 ### LTV
 
-Plot the user lifetime value
+Plot the user lifetime value with surrounding HDI
 
 ```python
 fig, ax = plt.subplots(figsize=(20, 10))
@@ -111,9 +115,11 @@ ax.legend()
 ax.grid()
 ```
 
+<img src='https://github.com/luke14free/lucius-ltv/blob/main/assets/ltv.png?raw=true'>
+
 ### Conversion Rate
 
-Plot the conversion rate by cohort
+Plot the conversion rate by cohort with sorrounding HDI
 
 ```python
 fig, ax = plt.subplots(figsize=(20, 10))
@@ -122,6 +128,8 @@ fig.suptitle(f'Conversion Rate')
 ax.grid()
 ```
 
+<img src='https://github.com/luke14free/lucius-ltv/blob/main/assets/conversion_rate.png?raw=true'>
+
 ### Cohort matrix
 
 Plot the cohort matrix retention rates
@@ -129,6 +137,8 @@ Plot the cohort matrix retention rates
 ```python
 plot_cohort_matrix_retention(cohort_matrix, 'Cohort Retention')
 ```
+
+<img src='https://github.com/luke14free/lucius-ltv/blob/main/assets/cohort.png?raw=true'>
 
 ### Posterior distributions vs true values
 
@@ -147,3 +157,5 @@ az.plot_posterior(inference_data, var_names=("conversion_rate",),
                   ax=ax3)
 fig.suptitle(f'True v Recovered values')
 ```
+
+<img src='https://github.com/luke14free/lucius-ltv/blob/main/assets/recovered.png?raw=true'>
