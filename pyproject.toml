@@ -1,13 +1,22 @@
 [tool.poetry]
 name = "lucius-ltv"
-version = "0.1.0"
+version = "0.1.1"
 description = "A simple multicohort LTV calculator for subscription based products"
 authors = ["Luca Giacomel <luca.giacomel@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/luke14free/lucius-ltv"
+repository = "https://github.com/luke14free/lucius-ltv"
+keywords = ["ltv", "lifetime", "value", "cltv"]
+include = [
+    "LICENSE",
+]
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.11"
 pymc3 = "^3.11.4"
 seaborn = "^0.11.2"
+arviz = "^0.11.4"
 
 [tool.poetry.dev-dependencies]
 
