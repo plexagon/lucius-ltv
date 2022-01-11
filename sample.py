@@ -2,9 +2,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import arviz as az
 
-from utils import generate_synthetic_cohort_matrix
-from model import fit_sbg_model, compute_empirical_ltv
-from plots import plot_ltv, plot_cohort_matrix_retention, plot_conversion_rate
+from lucius_ltv.utils import generate_synthetic_cohort_matrix
+from lucius_ltv.model import fit_sbg_model, compute_empirical_ltv
+from lucius_ltv.plots import plot_ltv, plot_cohort_matrix_retention, plot_conversion_rate
 
 
 def main():
