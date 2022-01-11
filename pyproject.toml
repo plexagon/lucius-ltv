@@ -5,8 +5,8 @@ description = "A simple multicohort LTV calculator for subscription based produc
 authors = ["Luca Giacomel <luca.giacomel@gmail.com>"]
 license = "MIT"
 readme = "README.md"
-homepage = "https://github.com/luke14free/lucius-ltv"
-repository = "https://github.com/luke14free/lucius-ltv"
+homepage = "https://github.com/plexagon/lucius-ltv"
+repository = "https://github.com/plexagon/lucius-ltv"
 keywords = ["ltv", "lifetime", "value", "cltv"]
 include = [
     "LICENSE",
