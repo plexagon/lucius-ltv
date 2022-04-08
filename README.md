@@ -22,7 +22,7 @@ To build a cohort matrix:
  * Track those users over time to observe how many where still alive in the following periods
  * Stack them in order to obtain a pd.DataFrame resembling this:
 
-| 2015 | 2016 | 2017 | 2018 | 2019 | 2020 | 2021 | 2022 |
+| 2022 | 2021 | 2020 | 2019 | 2018 | 2017 | 2016 | 2015 |
 |------|------|------|------|------|------|------|------|
 | 100  | 95   | 82   | 78   | 75   | 71   | 68   | 63   |
 |      | 120  | 109  | 99   | 87   | 80   | 67   | 66   |
