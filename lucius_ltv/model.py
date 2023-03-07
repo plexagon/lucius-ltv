@@ -1,15 +1,17 @@
 from typing import List, Any, Tuple
 
-import theano
-import theano.tensor as tt
-import pymc3 as pm
+import pytensor
+import pytensor.tensor as tt
+import pymc as pm
 import numpy as np
 import pandas as pd
 import arviz as az
 
-from pymc3.theanof import floatX, intX
+from pymc import floatX, intX
 from scipy import stats
 from scipy.special import beta as beta_f
+
+from pytensor.tensor.random.op import RandomVariable
 
 
 def betaln(a, b):
@@ -32,11 +34,27 @@ def beta_geom_pdf(x, a, b):
     return beta_f(a + 1, x + b - 1) / beta_f(a, b)
 
 
-class SPShiftedBetaGeometric(stats.rv_continuous):
-    def _pdf(self, x, t_max, a, b):
-        if x >= t_max:
-            return censored_beta_geom_pdf(x, a, b)
-        return beta_geom_pdf(x, a, b)
+class SPShiftedBetaGeometric(stats.rv_discrete):
+    def _argcheck(self, a, b, t_max):
+        return (a > 0) & (b > 0) & (t_max > 0)
+
+    def _pmf(self, x, a, b, t_max):
+        return np.where(x == 0, 0, np.where(x >= t_max, censored_beta_geom_pdf(x, a, b), beta_geom_pdf(x, a, b)))
+
+
+class ShiftedBetaGeometricRV(RandomVariable):
+    name: str = "ShiftedBetaGeometricRV"
+    ndim_supp: int = 0
+    ndims_params: List[int] = [0, 0, 0]
+    dtype: str = "int64"
+    _print_name: Tuple[str, str] = ("SBG", "\\operatorname{SBG}")
+
+    @classmethod
+    def rng_fn(cls, rng, a, b, t_max, size) -> np.ndarray:
+        return SPShiftedBetaGeometric().rvs(a, b, t_max, random_state=rng, size=size)
+
+
+sbgrv = ShiftedBetaGeometricRV()
 
 
 class ShiftedBetaGeometric(pm.Discrete):
@@ -47,17 +65,19 @@ class ShiftedBetaGeometric(pm.Discrete):
     or http://dx.doi.org/10.2139/ssrn.801145
     """
 
-    def __init__(self, a, b, surviving, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.a = tt.as_tensor_variable(floatX(a))
-        self.b = tt.as_tensor_variable(floatX(b))
-        self.surviving = tt.as_tensor_variable(intX(surviving))
-        self.mode = 1
+    rv_op = sbgrv
 
-    def logp(self, value):
+    @classmethod
+    def dist(cls, a, b, surviving, *args, **kwargs):
+        a = tt.as_tensor_variable(floatX(a))
+        b = tt.as_tensor_variable(floatX(b))
+        surviving = tt.as_tensor_variable(intX(surviving))
+        return super().dist([a, b, surviving], *args, **kwargs)
+
+    def logp(value, a, b, surviving):
         idx = tt.arange(1, value.shape[0] + 1, 1, dtype='int32')
-        return tt.sum(value * beta_geom_llh(idx, self.a, self.b)) + self.surviving * censored_beta_geom_llh(
-            value.shape[0], self.a, self.b)
+        return tt.sum(value * beta_geom_llh(idx, a, b)) + surviving * censored_beta_geom_llh(
+            value.shape[0], a, b)
 
 
 def fit_sbg_model(cohort_matrix: pd.DataFrame, price: float = 1, all_users: List[int] = None,
@@ -78,8 +98,8 @@ def fit_sbg_model(cohort_matrix: pd.DataFrame, price: float = 1, all_users: List
 
     model = pm.Model()
     with model:
-        alpha = pm.HalfCauchy('alpha', 0.05)  # pm.HalfFlat('alpha')#pm.HalfCauchy('beta', 1)
-        beta = pm.HalfCauchy('beta', 0.05)  # pm.HalfFlat('beta')
+        alpha = pm.HalfCauchy('alpha', 0.1)
+        beta = pm.HalfCauchy('beta', 0.1)
 
         can_fit = False
         starting_payers = []
@@ -117,34 +137,31 @@ def fit_sbg_model(cohort_matrix: pd.DataFrame, price: float = 1, all_users: List
 
             pm.Binomial('conversion_rate_obs', n=all_users, p=cohort_conversion_rate, observed=starting_payers)
 
-        survival_probabilities, _ = theano.scan(
-            fn=lambda t: tt.switch(tt.gt(t, 1), sbg_survival_rate(t - 1, alpha, beta), tt.ones(1)),
-            sequences=tt.arange(start=1, stop=periods + 1, step=1),
-        )
+        survivals = [1]
+        for i in range(1, periods):
+            survivals.append(sbg_survival_rate(i, alpha, beta))
 
-        survival_curve = tt.cumprod(survival_probabilities)
+        survival_curve = tt.cumprod(survivals)
         pm.Deterministic('survival_curve', survival_curve)
         pm.Deterministic('ltv', tt.cumsum(survival_curve * conversion_rate * price))
 
         if true_alpha and true_beta:
-            survival_probabilities, _ = theano.scan(
-                fn=lambda t: tt.switch(tt.gt(t, 1), sbg_survival_rate(t - 1, true_alpha, true_beta), tt.ones(1)),
-                sequences=tt.arange(start=1, stop=periods + 1, step=1),
-            )
+            true_survivals = [1]
+            for i in range(1, periods):
+                true_survivals.append(sbg_survival_rate(i, true_alpha, true_beta))
 
-            survival_curve = tt.cumprod(survival_probabilities)
-            pm.Deterministic('true_survival_curve', survival_curve)
-            pm.Deterministic('true_ltv', tt.cumsum(survival_curve * conversion_rate * price))
+            true_survival_curve = tt.cumprod(true_survivals)
+            pm.Deterministic('true_survival_curve', true_survival_curve)
+            pm.Deterministic('true_ltv', tt.cumsum(true_survival_curve * conversion_rate * price))
 
         if not can_fit:
             raise Exception(
                 f'Not enough data for fitting, you need 1 cohort with 4 observation periods and >{min_cohort_size}ppl')
 
         data = pm.sample(return_inferencedata=True, **sampler_kwargs)
+        data.extend(pm.sample_posterior_predictive(data))
 
-        samples = pm.fast_sample_posterior_predictive(data.posterior)
-
-    return az.concat(data, az.from_pymc3(posterior_predictive=samples)), model
+    return data, model
 
 
 def sbg_survival_rate(x, a, b):

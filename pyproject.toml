@@ -13,10 +13,11 @@ include = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.9,<3.11"
-pymc3 = "^3.11.4"
+python = ">=3.9,<4.0"
 seaborn = "^0.11.2"
-arviz = "^0.11.4"
+arviz = ">=0.13.0"
+pytensor = "^2.10.1"
+pymc = ">=5.1.0"
 
 [tool.poetry.dev-dependencies]
 
